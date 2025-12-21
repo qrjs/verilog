@@ -1,0 +1,160 @@
+import numpy as np
+import os
+
+def maxpool_2x2(input_data, stride=2):
+    """
+    Perform 2x2 max pooling with stride=2
+    Args:
+        input_data: numpy array of shape (height, width, channels)
+        stride: pooling stride (default 2)
+    Returns:
+        output: numpy array of shape (out_height, out_width, channels)
+    """
+    input_height, input_width, channels = input_data.shape
+    kernel_size = 2
+    
+    # For maxpool with kernel=2, stride=2, output size is input_size / 2
+    out_height = input_height // stride
+    out_width = input_width // stride
+    
+    output = np.zeros((out_height, out_width, channels), dtype=np.uint8)
+    
+    for c in range(channels):
+        for oh in range(out_height):
+            for ow in range(out_width):
+                # Get the 2x2 window
+                ih_start = oh * stride
+                iw_start = ow * stride
+                
+                window = input_data[ih_start:ih_start+kernel_size, 
+                                  iw_start:iw_start+kernel_size, c]
+                
+                # Find max value in the window
+                output[oh, ow, c] = np.max(window)
+    
+    return output
+
+
+def save_input_to_mem(input_data, filename, mode, P_CH, A_BIT=8):
+    """Save input data in format for hardware testbench"""
+    height, width, channels = input_data.shape
+    FOLD = channels // P_CH
+    
+    with open(filename, mode) as f:
+        for h in range(height):
+            for w in range(width):
+                for fold in range(FOLD):
+                    # Pack P_CH channels into one hex line
+                    hex_values = []
+                    for ch in range(P_CH):
+                        val = int(input_data[h, w, fold * P_CH + ch])
+                        hex_values.append(f"{val:02x}")
+                    # Write in little-endian order (reverse)
+                    f.write(''.join(reversed(hex_values)) + '\n')
+    
+    print(f"Saved input to {filename}")
+    print(f"  Format: hex values for $readmemh")
+
+
+def save_output_to_mem(output, filename, mode, P_CH, A_BIT=8):
+    """Save output data (golden reference) in format for hardware testbench"""
+    height, width, channels = output.shape
+    FOLD = channels // P_CH
+    
+    with open(filename, mode) as f:
+        for h in range(height):
+            for w in range(width):
+                for fold in range(FOLD):
+                    # Pack P_CH channels into one hex line
+                    hex_values = []
+                    for ch in range(P_CH):
+                        val = int(output[h, w, fold * P_CH + ch])
+                        hex_values.append(f"{val:02x}")
+                    # Write in little-endian order (reverse)
+                    f.write(''.join(reversed(hex_values)) + '\n')
+    
+    print(f"Saved output (golden) to {filename}")
+    print(f"  Format: hex values for $readmemh")
+
+
+if __name__ == "__main__":
+    # Configuration
+    height, width, channels = 40, 80, 32  # Input dimensions
+    P_CH = 4  # Parallel channels
+    kernel_size = 2
+    stride = 2
+    A_BIT = 8
+
+    # Output dimensions
+    out_height = height // stride
+    out_width = width // stride
+
+    print("="*60)
+    print("MaxPool 2x2 Configuration:")
+    print(f"  Input: {height}x{width}x{channels}")
+    print(f"  Output: {out_height}x{out_width}x{channels}")
+    print(f"  P_CH={P_CH}")
+    print(f"  Kernel={kernel_size}x{kernel_size}, Stride={stride}")
+    print(f"  A_BIT={A_BIT}")
+    print("="*60)
+
+    # Generate test data using arange (0-127 range to avoid overflow)
+    input_size = height * width * channels
+    input_data = (np.arange(input_size) % 128).astype(np.uint8)  # 0-127, uint8
+    input_data = input_data.reshape(height, width, channels)
+    
+    print(f"\nInput data range: [{np.min(input_data)}, {np.max(input_data)}]")
+    print(f"Input data shape: {input_data.shape}")
+    
+    # Perform maxpool
+    output_golden = maxpool_2x2(input_data, stride)
+    
+    print(f"\nOutput shape: {output_golden.shape}")
+    print(f"Output data range: [{np.min(output_golden)}, {np.max(output_golden)}]")
+    
+    # Verify dimensions
+    assert output_golden.shape == (out_height, out_width, channels), \
+        f"Output shape mismatch: expected ({out_height}, {out_width}, {channels}), got {output_golden.shape}"
+    
+    # Print some sample values for debugging
+    print("\n" + "="*60)
+    print("Sample values (first channel, first 2x2 window):")
+    print("Input window (top-left 2x2):")
+    print(input_data[0:2, 0:2, 0])
+    print(f"Output (should be max): {output_golden[0, 0, 0]}")
+    print(f"Expected max: {np.max(input_data[0:2, 0:2, 0])}")
+    
+    # Save parameters to SystemVerilog header file
+    print("\n" + "="*60)
+    print("Saving configuration and data files...")
+    
+    with open('maxpool_config.svh', 'w') as f:
+        f.write("// Auto-generated configuration file for maxpool testbench\n")
+        f.write("// Generated by gen_maxpool.py\n\n")
+        f.write(f"localparam int unsigned P_CH = {P_CH};\n")
+        f.write(f"localparam int unsigned N_CH = {channels};\n")
+        f.write(f"localparam int unsigned N_IH = {height};\n")
+        f.write(f"localparam int unsigned N_IW = {width};\n")
+        f.write(f"localparam int unsigned N_OH = {out_height};\n")
+        f.write(f"localparam int unsigned N_OW = {out_width};\n")
+        f.write(f"localparam int unsigned A_BIT = {A_BIT};\n")
+        f.write(f"localparam int unsigned STRIDE = {stride};\n")
+        f.write(f"localparam int unsigned KERNEL = {kernel_size};\n")
+        f.write(f"\n// Derived parameters\n")
+        f.write(f"localparam int unsigned FOLD = N_CH / P_CH;\n")
+        f.write(f"localparam int unsigned INPUT_SIZE = N_IH * N_IW * FOLD;\n")
+        f.write(f"localparam int unsigned OUTPUT_SIZE = N_OH * N_OW * FOLD;\n")
+    print("Saved configuration to maxpool_config.svh")
+    
+    save_input_to_mem(input_data, 'maxpool_input.mem', 'w', P_CH, A_BIT)
+    save_input_to_mem(input_data, 'maxpool_input.mem', 'a', P_CH, A_BIT)
+    save_output_to_mem(output_golden, 'maxpool_output.mem', 'w', P_CH, A_BIT)
+    save_output_to_mem(output_golden, 'maxpool_output.mem', 'a', P_CH, A_BIT)
+    
+    print("\n" + "="*60)
+    print("Data generation complete!")
+    print(f"  Input size: {height}x{width}x{channels} = {height*width*channels} bytes")
+    print(f"  Output size: {out_height}x{out_width}x{channels} = {out_height*out_width*channels} bytes")
+    print(f"  Memory lines (input): {height*width*channels//P_CH}")
+    print(f"  Memory lines (output): {out_height*out_width*channels//P_CH}")
+    print("="*60)
