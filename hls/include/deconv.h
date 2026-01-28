@@ -118,7 +118,7 @@ void deconv(data_stream<P_ICH * A_BIT>& in,
                 {
                     for (signed kw = K - 1; kw >= 0; kw--)
                     {
-                        int h_temp = oh - kh + P;
+                        int h_temp = oh - kh;
                         int w_temp = ow - kw + P;
                         for (unsigned fi = 0; fi < FOLD_I; ++fi)
                         {
@@ -156,7 +156,7 @@ void deconv(data_stream<P_ICH * A_BIT>& in,
                                     }
                                 }
                             }
-                            if (kh == 0 && kw == 0 && fi == FOLD_I - 1)
+                            if (kh == 0 && kw == 0)
                             {
                                 ap_uint<P_OCH * B_BIT> out_buf;
                                 for (unsigned poc = 0; poc < P_OCH; ++poc)

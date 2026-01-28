@@ -43,7 +43,6 @@ module ut_conv;
         .N_ICH(N_ICH),
         .N_OCH(N_OCH),
         .K(K),
-        .Z_NUM(Z_NUM),
         .A_BIT(A_BIT),
         .W_BIT(W_BIT),
         .B_BIT(B_BIT),

@@ -51,7 +51,7 @@ void maxpool_2x2(data_stream<P_CH * A_BIT>& in, data_stream<P_CH * A_BIT>& out)
                 const unsigned idx = c >> 1;
                 ap_uint<P_CH * A_BIT> in_buf = in.read();
                 ap_uint<P_CH * A_BIT> out_buf;
-                if ((r & 0x1) == 0)
+                if ((r & 0x1) != 0)
                 {
                     if ((c & 0x1) == 0)
                     {
@@ -61,8 +61,8 @@ void maxpool_2x2(data_stream<P_CH * A_BIT>& in, data_stream<P_CH * A_BIT>& out)
                     else
                     {
                         // 0x1
-                        out_buf = max<P_CH, A_BIT>(in_buf, line[idx][f]);
-                        line[idx][f] = out_buf;
+                        // out_buf = max<P_CH, A_BIT>(in_buf, line[idx][f]);
+                        line[idx][f] = in_buf;
                     }
                 }
                 else

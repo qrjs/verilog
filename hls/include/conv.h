@@ -125,7 +125,7 @@ void conv(data_stream<P_ICH * A_BIT>& in,
                     if (fo == 0)
                     {
                         in_buf = in.read();
-                        line[fi][k] = in_buf;
+                        // line[fi][k] = in_buf;
                     }
                     else
                     {
@@ -144,7 +144,7 @@ void conv(data_stream<P_ICH * A_BIT>& in,
                         }
                     }
 
-                    if (k == K * K - 1 && fi == FOLD_I - 1)
+                    if (k == K * K - 1)
                     {
                         ap_uint<P_OCH * B_BIT> out_buf;
                         for (unsigned o = 0; o < P_OCH; ++o)

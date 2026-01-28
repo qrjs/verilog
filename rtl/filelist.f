@@ -1,7 +1,9 @@
 $PROJECT_PATH/design/add.sv
 $PROJECT_PATH/design/delayline.sv
 $PROJECT_PATH/design/conv_mac.sv
+$PROJECT_PATH/design/deconv_mac.sv
 $PROJECT_PATH/design/ram.sv
 $PROJECT_PATH/design/rom.sv
 $PROJECT_PATH/design/conv.sv
+$PROJECT_PATH/design/deconv.sv
 $PROJECT_PATH/design/maxpool_2x2.sv

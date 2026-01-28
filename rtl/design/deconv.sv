@@ -9,7 +9,6 @@ module deconv #(
     parameter int unsigned P          = 1,
     parameter int unsigned S          = 2,
     parameter int unsigned O_P        = 0,
-    parameter int unsigned Z_NUM      = 8,
     parameter int unsigned A_BIT      = 8,
     parameter int unsigned W_BIT      = 8,
     parameter int unsigned B_BIT      = 32,
@@ -38,10 +37,8 @@ module deconv #(
     localparam int unsigned LB_DEPTH = LB_H * N_IW * FOLD_I;
     localparam int unsigned LB_AWIDTH = $clog2(LB_DEPTH);
 
-    logic [$clog2(WEIGHT_DEPTH)-1:0] weight_addr_d0;
-    logic [   P_OCH*P_ICH*W_BIT-1:0] weight_data_d1;
-    logic [   P_OCH*P_ICH*W_BIT-1:0] weight_data_d2;
-    localparam int unsigned ACC_BIT = (Z_NUM + A_BIT + W_BIT) * 2;
+    logic [$clog2(WEIGHT_DEPTH)-1:0] weight_addr;
+    logic [   P_OCH*P_ICH*W_BIT-1:0] weight_data;
     rom #(
         .DWIDTH(P_OCH * P_ICH * W_BIT),
         .AWIDTH($clog2(WEIGHT_DEPTH)),
@@ -51,8 +48,8 @@ module deconv #(
     ) u_weight_rom (
         .clk  (clk),
         .ce0  (out_ready),
-        .addr0(weight_addr_d0),
-        .q0   (weight_data_d1)
+        .addr0(weight_addr),
+        .q0   (weight_data)
     );
 
 
@@ -60,9 +57,8 @@ module deconv #(
     logic [  LB_AWIDTH-1:0] line_buffer_waddr;
     logic [P_ICH*A_BIT-1:0] line_buffer_wdata;
     logic                   line_buffer_re;
-    logic [  LB_AWIDTH-1:0] line_buffer_raddr_d0;
-    logic [  LB_AWIDTH-1:0] line_buffer_raddr_d1;
-    logic [P_ICH*A_BIT-1:0] line_buffer_rdata_d2;
+    logic [  LB_AWIDTH-1:0] line_buffer_raddr;
+    logic [P_ICH*A_BIT-1:0] line_buffer_rdata;
 
     ram #(
         .DWIDTH(P_ICH * A_BIT),
@@ -75,8 +71,8 @@ module deconv #(
         .waddr(line_buffer_waddr),
         .wdata(line_buffer_wdata),
         .re   (line_buffer_re),
-        .raddr(line_buffer_raddr_d1),
-        .rdata(line_buffer_rdata_d2)
+        .raddr(line_buffer_raddr),
+        .rdata(line_buffer_rdata)
     );
 
     typedef enum logic [1:0] {
@@ -102,15 +98,10 @@ module deconv #(
     logic                               need_read_input;
     logic        [ $clog2(N_IH*N_IW):0] read_input_cnt;
     logic                               read_input_done;
-    logic                               mac_array_data_vld_d1;
-    logic                               mac_array_data_vld_d2;
-    logic        [     P_ICH*A_BIT-1:0] in_buf_d1;
-    logic                               is_fst_kh_kw_fi_d1;
-    logic                               is_fst_kh_kw_fi_d2;
-    logic                               is_lst_kh_kw_fi_d1;
-    logic                               is_lst_kh_kw_fi_d2;
-    logic                               is_lst_kh_kw_fi_dly   [P_ICH+1];
-    logic signed [         ACC_BIT-1:0] acc                   [  P_OCH];
+    logic                               mac_array_data_vld;
+    logic                               is_fst_kh_kw_fi;
+    logic                               is_lst_kh_kw_fi;
+    logic signed [           B_BIT-1:0] acc                   [  P_OCH];
     logic signed [  $clog2(N_OH+K)+1:0] h_temp;
     logic signed [  $clog2(N_OW+K)+1:0] w_temp;
     logic signed [    $clog2(N_IH)+1:0] ih;
@@ -122,8 +113,8 @@ module deconv #(
     assign ih = h_temp / S;
     assign iw = w_temp / S;
     assign iw_to_read = cntr_ow / S;
-    assign valid_pos = (h_temp >= 0) && (h_temp % S == 0) && 
-                       (w_temp >= 0) && (w_temp % S == 0) &&
+    assign valid_pos = (h_temp >= 0) && ((h_temp % S == 0) || (w_temp % S == 0)) && 
+                       (w_temp >= 0) &&
                        (ih >= 0) && (ih < N_IH) && 
                        (iw >= 0) && (iw < N_IW);
     assign need_read_input = (cntr_oh % S == 0) && (cntr_ow % S == 0) && 
@@ -133,14 +124,14 @@ module deconv #(
     assign pipe_en_out = out_ready;
     assign pipe_en = pipe_en_in && pipe_en_out;
     assign in_ready = ((state == ST_INIT) || (state == ST_PROC && need_read_input && out_ready));
-    assign weight_addr_d0 = (cntr_fo * KK * FOLD_I) + (cntr_fi * KK) + (cntr_kh * K + cntr_kw);
+    assign weight_addr = (cntr_fo * KK * FOLD_I) + (cntr_fi * KK) + (cntr_kw * K + cntr_kh);
     assign line_buffer_we = ((state == ST_INIT) && in_valid) || ((state == ST_PROC) && need_read_input && in_valid);
     assign line_buffer_waddr = (state == ST_INIT) ? 
                                (cntr_init_h * N_IW * FOLD_I + cntr_init_w * FOLD_I + cntr_init_fi) :
                                ((ih_to_read % LB_H) * N_IW * FOLD_I + iw_to_read * FOLD_I + cntr_fi);
     assign line_buffer_wdata = in_data;
     assign line_buffer_re = out_ready && (state == ST_PROC);
-    assign line_buffer_raddr_d0 = ((ih % LB_H) * N_IW * FOLD_I + iw * FOLD_I + cntr_fi);
+    assign line_buffer_raddr = ((ih % LB_H) * N_IW * FOLD_I + iw * FOLD_I + cntr_fi) + (cntr_kh & 1'b1);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -236,98 +227,50 @@ module deconv #(
         end
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            line_buffer_raddr_d1  <= '0;
-            is_fst_kh_kw_fi_d1    <= 1'b0;
-            is_fst_kh_kw_fi_d2    <= 1'b0;
-            is_lst_kh_kw_fi_d1    <= 1'b0;
-            is_lst_kh_kw_fi_d2    <= 1'b0;
-            mac_array_data_vld_d1 <= 1'b0;
-            mac_array_data_vld_d2 <= 1'b0;
-            weight_data_d2        <= '0;
-        end else if (out_ready) begin
-            line_buffer_raddr_d1  <= line_buffer_raddr_d0;
-            is_fst_kh_kw_fi_d1    <= (cntr_kh == K - 1) && (cntr_kw == K - 1) && (cntr_fi == 0);
-            is_fst_kh_kw_fi_d2    <= is_fst_kh_kw_fi_d1;
-            is_lst_kh_kw_fi_d1    <= (cntr_kh == 0) && (cntr_kw == 0) && (cntr_fi == FOLD_I - 1);
-            is_lst_kh_kw_fi_d2    <= is_lst_kh_kw_fi_d1;
-            mac_array_data_vld_d1 <= valid_pos && (state == ST_PROC);
-            mac_array_data_vld_d2 <= mac_array_data_vld_d1;
-            weight_data_d2        <= weight_data_d1;
-        end
-    end
+    assign is_fst_kh_kw_fi    = (cntr_kh == K - 1) && (cntr_kw == K - 1) && (cntr_fi == 0);
+    assign is_lst_kh_kw_fi    = (cntr_kh == 0) && (cntr_kw == 0) && (cntr_fi == FOLD_I - 1);
+    assign mac_array_data_vld = valid_pos && (state == ST_PROC);
 
     logic        [A_BIT-1:0] x_vec[P_ICH];
     logic signed [W_BIT-1:0] w_vec[P_OCH] [P_ICH];
     always_comb begin
         for (int i = 0; i < P_ICH; i++) begin
-            x_vec[i] = line_buffer_rdata_d2[i*A_BIT+:A_BIT];
+            x_vec[i] = line_buffer_rdata[i*A_BIT+:A_BIT];
         end
     end
 
     always_comb begin
         for (int o = 0; o < P_OCH; o++) begin
             for (int i = 0; i < P_ICH; i++) begin
-                w_vec[o][i] = weight_data_d2[(P_ICH*o+i)*W_BIT+:W_BIT];
+                w_vec[o][i] = weight_data[(P_ICH*o+i)*W_BIT+:W_BIT];
             end
         end
     end
 
     generate
-        for (genvar o = 0; o < P_OCH / 2; o++) begin : gen_mac_array
-            mac_array_double #(
-                .P_ICH  (P_ICH),
-                .Z_NUM  (Z_NUM),
-                .A_BIT  (A_BIT),
-                .W_BIT  (W_BIT),
-                .B_BIT  (B_BIT),
-                .ACC_BIT(ACC_BIT)
+        for (genvar o = 0; o < P_OCH; o++) begin : gen_mac_array
+            mac_array #(
+                .P_ICH(P_ICH),
+                .A_BIT(A_BIT),
+                .W_BIT(W_BIT),
+                .B_BIT(B_BIT)
             ) u_mac_array (
                 .clk    (clk),
                 .rst_n  (rst_n),
                 .en     (out_ready),
-                .dat_vld(mac_array_data_vld_d2),
-                .clr    (is_fst_kh_kw_fi_d2),
+                .dat_vld(mac_array_data_vld),
+                .clr    (is_fst_kh_kw_fi),
                 .x_vec  (x_vec),
-                .w1_vec (w_vec[2*o]),
-                .w2_vec (w_vec[2*o+1]),
-                .acc1   (acc[2*o]),
-                .acc2   (acc[2*o+1])
+                .w_vec  (w_vec[o]),
+                .acc    (acc[o])
             );
         end
     endgenerate
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            for (int i = 0; i < P_ICH + 1; i++) begin
-                is_lst_kh_kw_fi_dly[i] <= 1'b0;
-            end
-        end else if (out_ready) begin
-            is_lst_kh_kw_fi_dly[0] <= is_lst_kh_kw_fi_d2;
-            for (int i = 1; i < P_ICH + 1; i++) begin
-                is_lst_kh_kw_fi_dly[i] <= is_lst_kh_kw_fi_dly[i-1];
-            end
-        end
-    end
-
     always_comb begin
         for (int o = 0; o < P_OCH; o++) begin
-            out_data[o*B_BIT+:B_BIT] = acc[o];
+            out_data[o*B_BIT+:B_BIT] = acc[P_OCH-1-o];
         end
     end
-    assign out_valid = is_lst_kh_kw_fi_dly[P_ICH];
-    /*
-    always_ff @(posedge clk) begin
-        if (out_ready && mac_array_data_vld_d1 && (state == ST_PROC)) begin
-            $write("oh %0d, ow %0d, kh %0d, kw %0d, h_temp %0d, w_temp %0d, ih %0d, iw %0d, clr %0d", 
-                   cntr_oh, cntr_ow, cntr_kh, cntr_kw, h_temp, w_temp, ih, iw, is_fst_kh_kw_fi_d1);
-            for (int i = 0; i < P_ICH; i++) begin
-                $write(", x[%0d]", i, x_vec[i]);
-                $write(", w[%0d] %0d", i, $signed(w_vec[0][i]));
-            end
-            $display("");
-        end
-    end
-*/
+    assign out_valid = is_lst_kh_kw_fi;
 endmodule

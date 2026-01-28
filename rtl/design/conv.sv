@@ -35,31 +35,19 @@ module conv #(
     logic        [        $clog2(KK+1)-1:0] cntr_kk;
     logic                                   pipe_en_in;
     logic                                   pipe_en_out;
-    logic                                   is_fst_fo_d0;
-    logic                                   is_fst_fo_d1;
-    logic                                   is_fst_fo_d2;
-    logic                                   mac_array_data_vld_d1;
-    logic                                   mac_array_data_vld_d2;
-    logic        [         P_ICH*A_BIT-1:0] in_data_d1;
-    logic        [         P_ICH*A_BIT-1:0] in_data_d2;
-    logic        [         P_ICH*A_BIT-1:0] in_buf_d2;
-    logic                                   is_fst_kk_fi_d0;
-    logic                                   is_fst_kk_fi_d1;
-    logic                                   is_fst_kk_fi_d2;
-    logic                                   is_lst_kk_fi_d0;
-    logic                                   is_lst_kk_fi_d1;
-    logic                                   is_lst_kk_fi_d2;
-    logic                                   is_lst_kk_fi_dly      [P_ICH+1];
+    logic                                   is_fst_fo;
+    logic                                   mac_array_data_vld;
+    logic        [         P_ICH*A_BIT-1:0] in_buf;
+    logic                                   is_fst_kk_fi;
+    logic                                   is_lst_kk_fi;
     logic                                   line_buffer_we;
     logic        [           LB_AWIDTH-1:0] line_buffer_waddr;
     logic        [         P_ICH*A_BIT-1:0] line_buffer_wdata;
     logic                                   line_buffer_re;
-    logic        [           LB_AWIDTH-1:0] line_buffer_raddr_d0;
-    logic        [           LB_AWIDTH-1:0] line_buffer_raddr_d1;
-    logic        [         P_ICH*A_BIT-1:0] line_buffer_rdata_d2;
-    logic        [$clog2(WEIGHT_DEPTH)-1:0] weight_addr_d0;
-    logic        [   P_OCH*P_ICH*W_BIT-1:0] weight_data_d1;
-    logic        [   P_OCH*P_ICH*W_BIT-1:0] weight_data_d2;
+    logic        [           LB_AWIDTH-1:0] line_buffer_raddr;
+    logic        [         P_ICH*A_BIT-1:0] line_buffer_rdata;
+    logic        [$clog2(WEIGHT_DEPTH)-1:0] weight_addr;
+    logic        [   P_OCH*P_ICH*W_BIT-1:0] weight_data;
 
     rom #(
         .DWIDTH(P_OCH * P_ICH * W_BIT),
@@ -70,37 +58,38 @@ module conv #(
     ) u_weight_rom (
         .clk  (clk),
         .ce0  (out_ready),
-        .addr0(weight_addr_d0),
-        .q0   (weight_data_d1)
+        .addr0(weight_addr),
+        .q0   (weight_data)
     );
 
     ram #(
-        .DWIDTH  (P_ICH * A_BIT),
-        .AWIDTH  (LB_AWIDTH),
-        .MEM_SIZE(LB_DEPTH)
+        .DWIDTH(P_ICH * A_BIT),
+        .AWIDTH(LB_AWIDTH),
+        .MEM_SIZE(LB_DEPTH),
+        .RAM_STYLE("ultra")
     ) u_line_buffer (
         .clk  (clk),
         .we   (line_buffer_we),
         .waddr(line_buffer_waddr),
         .wdata(line_buffer_wdata),
         .re   (line_buffer_re),
-        .raddr(line_buffer_raddr_d1),
-        .rdata(line_buffer_rdata_d2)
+        .raddr(line_buffer_raddr),
+        .rdata(line_buffer_rdata)
     );
 
-    assign is_fst_fo_d0         = (cntr_fo == 0);
-    assign is_fst_kk_fi_d0      = (cntr_kk == 0) && (cntr_fi == 0);
-    assign is_lst_kk_fi_d0      = (cntr_kk == KK - 1) && (cntr_fi == FOLD_I - 1) && pipe_en_in;
-    assign pipe_en_in           = is_fst_fo_d0 ? in_valid : 1'b1;
+    assign is_fst_fo            = (cntr_fo == 0);
+    assign is_fst_kk_fi         = (cntr_kk == 0) && (cntr_fi == 0);
+    assign is_lst_kk_fi         = (cntr_kk == KK - 1) && (cntr_fi == FOLD_I - 1) && pipe_en_in;
+    assign pipe_en_in           = is_fst_fo ? in_valid : 1'b1;
     assign pipe_en_out          = out_ready;
     assign pipe_en              = pipe_en_in && pipe_en_out;
-    assign in_ready             = is_fst_fo_d0 && out_ready;
-    assign weight_addr_d0       = (cntr_fo * KK * FOLD_I) + cntr_fi * KK + cntr_kk;
-    assign line_buffer_we       = is_fst_fo_d0 && in_valid && out_ready;
+    assign in_ready             = is_fst_fo && !out_ready;
+    assign weight_addr          = (cntr_fo * KK * FOLD_I) + cntr_fi * KK + cntr_kk;
+    assign line_buffer_we       = ;
     assign line_buffer_waddr    = cntr_fi * KK + cntr_kk;
-    assign line_buffer_wdata    = in_data;
-    assign line_buffer_re       = out_ready;
-    assign line_buffer_raddr_d0 = cntr_fi * KK + cntr_kk;
+    assign line_buffer_wdata    = ;
+    assign line_buffer_re       = ;
+    assign line_buffer_raddr    = cntr_fi * KK + cntr_kk;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -115,7 +104,7 @@ module conv #(
                     cntr_fi <= 0;
                     if (cntr_fo == FOLD_O - 1) begin
                         cntr_fo <= 0;
-                        if (cntr_hw == N_HW - 1) begin
+                        if (cntr_hw == N_HW) begin
                             cntr_hw <= 0;
                         end else begin
                             cntr_hw <= cntr_hw + 1;
@@ -132,48 +121,20 @@ module conv #(
         end
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            line_buffer_raddr_d1  <= 'd0;
-            in_data_d1            <= 'd0;
-            in_data_d2            <= 'd0;
-            is_fst_fo_d1          <= 'd0;
-            is_fst_fo_d2          <= 'd0;
-            is_fst_kk_fi_d1       <= 'd0;
-            is_fst_kk_fi_d2       <= 'd0;
-            is_lst_kk_fi_d1       <= 'd0;
-            is_lst_kk_fi_d2       <= 'd0;
-            mac_array_data_vld_d1 <= 'd0;
-            mac_array_data_vld_d2 <= 'd0;
-            weight_data_d2        <= 'd0;
-        end else if (pipe_en_out) begin
-            line_buffer_raddr_d1  <= line_buffer_raddr_d0;
-            in_data_d1            <= in_data;
-            in_data_d2            <= in_data_d1;
-            is_fst_fo_d1          <= is_fst_fo_d0;
-            is_fst_fo_d2          <= is_fst_fo_d1;
-            is_fst_kk_fi_d1       <= is_fst_kk_fi_d0;
-            is_fst_kk_fi_d2       <= is_fst_kk_fi_d1;
-            is_lst_kk_fi_d1       <= is_lst_kk_fi_d0;
-            is_lst_kk_fi_d2       <= is_lst_kk_fi_d1;
-            mac_array_data_vld_d1 <= (is_fst_fo_d0 ? in_valid : 1'b1);
-            mac_array_data_vld_d2 <= mac_array_data_vld_d1;
-            weight_data_d2        <= weight_data_d1;
-        end
-    end
-    assign in_buf_d2 = is_fst_fo_d2 ? in_data_d2 : line_buffer_rdata_d2;
+    assign mac_array_data_vld = (is_fst_fo ? in_valid : 1'b1);
+    assign in_buf = is_fst_fo ? in_data : line_buffer_rdata;
     logic        [A_BIT-1:0] x_vec[P_ICH];
     logic signed [W_BIT-1:0] w_vec[P_OCH] [P_ICH];
     always_comb begin
         for (int i = 0; i < P_ICH; i++) begin
-            x_vec[i] = in_buf_d2[i*A_BIT+:A_BIT];
+            x_vec[P_ICH - 1 - i] = in_buf[i*A_BIT+:A_BIT];
         end
     end
 
     always_comb begin
         for (int o = 0; o < P_OCH; o++) begin
             for (int i = 0; i < P_ICH; i++) begin
-                w_vec[o][i] = weight_data_d2[(P_ICH*o+i)*W_BIT+:W_BIT];
+                w_vec[o][i] = weight_data[(P_ICH*o+i)*W_BIT+:W_BIT];
             end
         end
     end
@@ -189,8 +150,8 @@ module conv #(
                 .clk    (clk),
                 .rst_n  (rst_n),
                 .en     (pipe_en_out),
-                .dat_vld(mac_array_data_vld_d2),
-                .clr    (is_fst_kk_fi_d2),
+                .dat_vld(mac_array_data_vld),
+                .clr    (is_fst_kk_fi),
                 .x_vec  (x_vec),
                 .w_vec  (w_vec[o]),
                 .acc    (acc[o])
@@ -198,20 +159,7 @@ module conv #(
         end
     endgenerate
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            for (int i = 0; i < P_ICH + 1; i++) begin
-                is_lst_kk_fi_dly[i] <= 1'b0;
-            end
-        end else if (pipe_en_out) begin
-            is_lst_kk_fi_dly[0] <= is_lst_kk_fi_d2;
-            for (int i = 1; i < P_ICH + 1; i++) begin
-                is_lst_kk_fi_dly[i] <= is_lst_kk_fi_dly[i-1];
-            end
-        end
-    end
-
-    assign out_valid = is_lst_kk_fi_dly[P_ICH];
+    assign out_valid = is_lst_kk_fi;
 
     always_comb begin
         for (int o = 0; o < P_OCH; o++) begin
