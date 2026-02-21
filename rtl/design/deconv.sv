@@ -9,6 +9,7 @@ module deconv #(
     parameter int unsigned P          = 1,
     parameter int unsigned S          = 2,
     parameter int unsigned O_P        = 0,
+    parameter int unsigned Z_NUM      = 8,   // 仅满足 testbench 接口，未在逻辑中使用
     parameter int unsigned A_BIT      = 8,
     parameter int unsigned W_BIT      = 8,
     parameter int unsigned B_BIT      = 32,
@@ -113,9 +114,9 @@ module deconv #(
     assign ih = h_temp / S;
     assign iw = w_temp / S;
     assign iw_to_read = cntr_ow / S;
-    assign valid_pos = (h_temp >= 0) && ((h_temp % S == 0) || (w_temp % S == 0)) && 
-                       (w_temp >= 0) &&
-                       (ih >= 0) && (ih < N_IH) && 
+    assign valid_pos = (h_temp >= 0) && (h_temp % S == 0) &&
+                       (w_temp >= 0) && (w_temp % S == 0) &&
+                       (ih >= 0) && (ih < N_IH) &&
                        (iw >= 0) && (iw < N_IW);
     assign need_read_input = (cntr_oh % S == 0) && (cntr_ow % S == 0) && 
                              (cntr_kh == K - 1) && (cntr_kw == K - 1) && 
@@ -124,14 +125,14 @@ module deconv #(
     assign pipe_en_out = out_ready;
     assign pipe_en = pipe_en_in && pipe_en_out;
     assign in_ready = ((state == ST_INIT) || (state == ST_PROC && need_read_input && out_ready));
-    assign weight_addr = (cntr_fo * KK * FOLD_I) + (cntr_fi * KK) + (cntr_kw * K + cntr_kh);
+    assign weight_addr = (cntr_fo * KK * FOLD_I) + (cntr_fi * KK) + (cntr_kh * K + cntr_kw);
     assign line_buffer_we = ((state == ST_INIT) && in_valid) || ((state == ST_PROC) && need_read_input && in_valid);
     assign line_buffer_waddr = (state == ST_INIT) ? 
                                (cntr_init_h * N_IW * FOLD_I + cntr_init_w * FOLD_I + cntr_init_fi) :
                                ((ih_to_read % LB_H) * N_IW * FOLD_I + iw_to_read * FOLD_I + cntr_fi);
     assign line_buffer_wdata = in_data;
     assign line_buffer_re = out_ready && (state == ST_PROC);
-    assign line_buffer_raddr = ((ih % LB_H) * N_IW * FOLD_I + iw * FOLD_I + cntr_fi) + (cntr_kh & 1'b1);
+    assign line_buffer_raddr = (ih % LB_H) * N_IW * FOLD_I + iw * FOLD_I + cntr_fi;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -231,6 +232,22 @@ module deconv #(
     assign is_lst_kh_kw_fi    = (cntr_kh == 0) && (cntr_kw == 0) && (cntr_fi == FOLD_I - 1);
     assign mac_array_data_vld = valid_pos && (state == ST_PROC);
 
+    // 流水延迟：对齐 LB 和 weight ROM 各 1 拍的读取延迟
+    logic dat_vld_d;
+    logic clr_d;
+    logic out_valid_d;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            dat_vld_d   <= 1'b0;
+            clr_d       <= 1'b0;
+            out_valid_d <= 1'b0;
+        end else if (out_ready) begin
+            dat_vld_d   <= mac_array_data_vld;  // 延迟 1 拍与 lb_rdata 对齐
+            clr_d       <= is_fst_kh_kw_fi;     // 延迟 1 拍与 lb_rdata 对齐
+            out_valid_d <= is_lst_kh_kw_fi;     // 延迟 1 拍：combinational acc 包含最后一步
+        end
+    end
+
     logic        [A_BIT-1:0] x_vec[P_ICH];
     logic signed [W_BIT-1:0] w_vec[P_OCH] [P_ICH];
     always_comb begin
@@ -258,8 +275,8 @@ module deconv #(
                 .clk    (clk),
                 .rst_n  (rst_n),
                 .en     (out_ready),
-                .dat_vld(mac_array_data_vld),
-                .clr    (is_fst_kh_kw_fi),
+                .dat_vld(dat_vld_d),
+                .clr    (clr_d),
                 .x_vec  (x_vec),
                 .w_vec  (w_vec[o]),
                 .acc    (acc[o])
@@ -269,8 +286,8 @@ module deconv #(
 
     always_comb begin
         for (int o = 0; o < P_OCH; o++) begin
-            out_data[o*B_BIT+:B_BIT] = acc[P_OCH-1-o];
+            out_data[o*B_BIT+:B_BIT] = acc[o];
         end
     end
-    assign out_valid = is_lst_kh_kw_fi;
+    assign out_valid = out_valid_d;
 endmodule

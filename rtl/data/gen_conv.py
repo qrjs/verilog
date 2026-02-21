@@ -229,7 +229,7 @@ if __name__ == "__main__":
         f.write(f"localparam int unsigned A_BIT = {A_BIT};\n")
         f.write(f"localparam int unsigned W_BIT = {W_BIT};\n")
         f.write(f"localparam int unsigned B_BIT = {B_BIT};\n")
-        f.write(f"localparam int unsigned N_HW = {output_im2col.shape[1] * output_im2col.shape[2]};\n")
+        f.write(f"localparam int unsigned N_HW = {output_im2col.shape[0] * output_im2col.shape[1]};\n")
         f.write(f"\n// Im2col parameters\n")
         f.write(f"localparam int unsigned N_IH = {height};\n")
         f.write(f"localparam int unsigned N_IW = {width};\n")

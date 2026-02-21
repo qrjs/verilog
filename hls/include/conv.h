@@ -115,6 +115,13 @@ void conv(data_stream<P_ICH * A_BIT>& in,
     {
         for (unsigned fo = 0; fo < FOLD_O; ++fo)
         {
+            // 【Bug 修复说明】: 累加器(acc)必须在每个输出通道折叠 (fo) 开始前重置为0。
+            // 之前的代码将清零写在了外面，导致计算后续 fo 时混入了前面的旧结果。
+            for (unsigned o = 0; o < P_OCH; ++o)
+            {
+#pragma HLS UNROLL
+                acc[o] = 0;
+            }
             for (unsigned fi = 0; fi < FOLD_I; ++fi)
             {
                 for (unsigned k = 0; k < K * K; ++k)
@@ -125,7 +132,9 @@ void conv(data_stream<P_ICH * A_BIT>& in,
                     if (fo == 0)
                     {
                         in_buf = in.read();
-                        // line[fi][k] = in_buf;
+                        // 【Bug 修复说明】: 恢复本应存入 line buffer 的输入数据。
+                        // 如果不写回，后续计算同一个输入块的其他输出通道(fo)时将读取到乱码。
+                        line[fi][k] = in_buf;
                     }
                     else
                     {
@@ -144,7 +153,10 @@ void conv(data_stream<P_ICH * A_BIT>& in,
                         }
                     }
 
-                    if (k == K * K - 1)
+                    // 【Bug 修复说明】: 输出逻辑必须等待所有输入通道折叠 (fi) 全部累加完毕，
+                    // 并且整个卷积核权重 (k) 都计算完后，才可以向外输出当前帧像素的计算结果。
+                    // 原代码只有 k 的判断，导致中间算了一部分输入层就重复输出了。
+                    if (k == K * K - 1 && fi == FOLD_I - 1)
                     {
                         ap_uint<P_OCH * B_BIT> out_buf;
                         for (unsigned o = 0; o < P_OCH; ++o)

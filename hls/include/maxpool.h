@@ -51,31 +51,35 @@ void maxpool_2x2(data_stream<P_CH * A_BIT>& in, data_stream<P_CH * A_BIT>& out)
                 const unsigned idx = c >> 1;
                 ap_uint<P_CH * A_BIT> in_buf = in.read();
                 ap_uint<P_CH * A_BIT> out_buf;
-                if ((r & 0x1) != 0)
+
+                // 【Bug 修复说明】: 状态机通过 r 和 c 的奇偶性判断 2x2 窗口内的位置。
+                // r & 0x1 == 0 代表“偶数行”(0, 2, 4...)。
+                // 之前代码错误地写成了 (r & 0x1) != 0，误把“奇数行”当成了“偶数行”，导致状态错乱。
+                if ((r & 0x1) == 0)
                 {
                     if ((c & 0x1) == 0)
                     {
-                        // 0x0
+                        // state 0x0: 偶数行，偶数列 -> 新的 2x2 窗口左上角，直接存入 line buffer
                         line[idx][f] = in_buf;
                     }
                     else
                     {
-                        // 0x1
-                        // out_buf = max<P_CH, A_BIT>(in_buf, line[idx][f]);
-                        line[idx][f] = in_buf;
+                        // state 0x1: 偶数行，奇数列 -> 右上角，与同行的左上角(已存在 line buffer) 比较去最大值，存回缓冲
+                        out_buf = max<P_CH, A_BIT>(in_buf, line[idx][f]);
+                        line[idx][f] = out_buf;
                     }
                 }
                 else
                 {
                     if ((c & 0x1) == 0)
                     {
-                        // 0x2
+                        // state 0x2: 奇数行，偶数列 -> 左下角，与上一行提取出的行最大值比较，存回缓冲
                         out_buf = max<P_CH, A_BIT>(in_buf, line[idx][f]);
                         line[idx][f] = out_buf;
                     }
                     else
                     {
-                        // 0x3
+                        // state 0x3: 奇数行，奇数列 -> 窗口的最后一个元素(右下角)，进行最终比较后输出
                         out_buf = max<P_CH, A_BIT>(in_buf, line[idx][f]);
                         out.write(out_buf);
                     }

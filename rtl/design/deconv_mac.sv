@@ -14,46 +14,42 @@ module mac_array #(
     output logic signed [B_BIT-1:0] acc
 );
 
-    logic signed [B_BIT-1:0] mac_cascade[P_ICH+1];
-
-    assign mac_cascade[0] = '0;
-
-    generate
-        for (genvar i = 0; i < P_ICH - 1; i++) begin : gen_mac
-            logic signed [B_BIT-1:0] acc_r;
-            always_ff @(posedge clk or negedge rst_n) begin
-                if (!rst_n) begin
-                    acc_r <= '0;
-                end else if (en) begin
-                    if (dat_vld) begin
-                        acc_r <= ($signed(x_vec[i]) * w_vec[i]) - mac_cascade[i];
-                    end else if (clr) begin
-                        acc_r <= '0;
-                    end
-                end
-            end
-            assign mac_cascade[i+1] = acc_r;
-        end
-    endgenerate
-
-    logic signed [B_BIT-1:0] tail_acc_r;
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            tail_acc_r <= '0;
-        end else if (en) begin
-            if (dat_vld) begin
-                if (clr) begin
-                    tail_acc_r <= ($signed(x_vec[P_ICH-1]) * w_vec[P_ICH-1]) + mac_cascade[P_ICH-1];
-                end else begin
-                    tail_acc_r <= tail_acc_r + ($signed(x_vec[P_ICH-1]) * w_vec[P_ICH-1]) + mac_cascade[P_ICH-1];
-                end
-            end else if (clr) begin
-                tail_acc_r <= tail_acc_r;
-            end
+    // 并行部分积：组合逻辑，同拍计算所有通道的乘积之和
+    logic signed [B_BIT-1:0] partial_sum;
+    always_comb begin
+        partial_sum = '0;
+        for (int i = 0; i < P_ICH; i++) begin
+            partial_sum = partial_sum + ($signed(x_vec[i]) * $signed(w_vec[i]));
         end
     end
-    assign mac_cascade[P_ICH] = tail_acc_r;
 
-    assign acc = mac_cascade[P_ICH];
+    // 跨时钟的累加寄存器
+    logic signed [B_BIT-1:0] acc_r;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            acc_r <= '0;
+        end else if (en) begin
+            case ({clr, dat_vld})
+                2'b00: acc_r <= acc_r;                   // 保持
+                2'b01: acc_r <= acc_r + partial_sum;     // 累加
+                2'b10: acc_r <= '0;                      // 清零（无数据）
+                2'b11: acc_r <= partial_sum;             // 清零并开始新的累加
+            endcase
+        end
+    end
+
+    // 透传组合输出：out_valid 与最后一拍 dat_vld 同拍，
+    // 直接将 acc_r + current partial_sum 暴露给下游
+    always_comb begin
+        if (dat_vld && en) begin
+            if (clr)
+                acc = partial_sum;
+            else
+                acc = acc_r + partial_sum;
+        end else begin
+            acc = acc_r;
+        end
+    end
 
 endmodule

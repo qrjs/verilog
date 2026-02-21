@@ -3,7 +3,7 @@ project(unet)
 
 set(CMAKE_CXX_STANDARD 14)
 include_directories(
-    /tools/Xilinx/2025.1/Vitis/include
+    /home/app/Vitis/2024.2/include
     ${PROJECT_SOURCE_DIR}/include
 )
 include_directories(include)

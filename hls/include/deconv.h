@@ -118,7 +118,10 @@ void deconv(data_stream<P_ICH * A_BIT>& in,
                 {
                     for (signed kw = K - 1; kw >= 0; kw--)
                     {
-                        int h_temp = oh - kh;
+                        // 【Bug 修复说明】: 计算原始高度坐标时漏加了 Padding 补偿 (P)。
+                        // 宽度方向有 +P，但高度方向原本只有 h_temp = oh - kh，这会导致
+                        // 输入特征索引越界或错位（通常表现为上方大片的错误或者算出一个很怪异的地址）。
+                        int h_temp = oh - kh + P;
                         int w_temp = ow - kw + P;
                         for (unsigned fi = 0; fi < FOLD_I; ++fi)
                         {
@@ -156,7 +159,7 @@ void deconv(data_stream<P_ICH * A_BIT>& in,
                                     }
                                 }
                             }
-                            if (kh == 0 && kw == 0)
+                            if (kh == 0 && kw == 0 && fi == FOLD_I - 1)
                             {
                                 ap_uint<P_OCH * B_BIT> out_buf;
                                 for (unsigned poc = 0; poc < P_OCH; ++poc)

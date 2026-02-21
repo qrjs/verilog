@@ -37,7 +37,7 @@ module conv #(
     logic                                   pipe_en_out;
     logic                                   is_fst_fo;
     logic                                   mac_array_data_vld;
-    logic        [         P_ICH*A_BIT-1:0] in_buf;
+
     logic                                   is_fst_kk_fi;
     logic                                   is_lst_kk_fi;
     logic                                   line_buffer_we;
@@ -53,11 +53,10 @@ module conv #(
         .DWIDTH(P_OCH * P_ICH * W_BIT),
         .AWIDTH($clog2(WEIGHT_DEPTH)),
         .MEM_SIZE(WEIGHT_DEPTH),
-        .INIT_FILE(W_FILE),
-        .ROM_TYPE(W_ROM_TYPE)
+        .INIT_FILE(W_FILE)
     ) u_weight_rom (
         .clk  (clk),
-        .ce0  (out_ready),
+        .ce0  (pipe_en_out),
         .addr0(weight_addr),
         .q0   (weight_data)
     );
@@ -80,16 +79,18 @@ module conv #(
     assign is_fst_fo            = (cntr_fo == 0);
     assign is_fst_kk_fi         = (cntr_kk == 0) && (cntr_fi == 0);
     assign is_lst_kk_fi         = (cntr_kk == KK - 1) && (cntr_fi == FOLD_I - 1) && pipe_en_in;
+    logic                                   out_valid_d;
     assign pipe_en_in           = is_fst_fo ? in_valid : 1'b1;
-    assign pipe_en_out          = out_ready;
+    assign pipe_en_out          = out_ready || (!out_valid_d);
     assign pipe_en              = pipe_en_in && pipe_en_out;
-    assign in_ready             = is_fst_fo && !out_ready;
+    // in_ready 仅在 is_fst_fo 时有效：fo=1 时 DUT 从 LB 读取，无需新输入
+    assign in_ready             = is_fst_fo && pipe_en_out;
     assign weight_addr          = (cntr_fo * KK * FOLD_I) + cntr_fi * KK + cntr_kk;
-    assign line_buffer_we       = ;
+    assign line_buffer_we       = is_fst_fo && in_valid;
     assign line_buffer_waddr    = cntr_fi * KK + cntr_kk;
-    assign line_buffer_wdata    = ;
-    assign line_buffer_re       = ;
-    assign line_buffer_raddr    = cntr_fi * KK + cntr_kk;
+    assign line_buffer_wdata    = in_data;
+    assign line_buffer_re    = !is_fst_fo && pipe_en_out;  // 暂停时不读 LB，防止 rdata 超前
+    assign line_buffer_raddr = cntr_fi * KK + cntr_kk;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -104,7 +105,7 @@ module conv #(
                     cntr_fi <= 0;
                     if (cntr_fo == FOLD_O - 1) begin
                         cntr_fo <= 0;
-                        if (cntr_hw == N_HW) begin
+                        if (cntr_hw == N_HW - 1) begin
                             cntr_hw <= 0;
                         end else begin
                             cntr_hw <= cntr_hw + 1;
@@ -122,14 +123,43 @@ module conv #(
     end
 
     assign mac_array_data_vld = (is_fst_fo ? in_valid : 1'b1);
-    assign in_buf = is_fst_fo ? in_data : line_buffer_rdata;
-    logic        [A_BIT-1:0] x_vec[P_ICH];
-    logic signed [W_BIT-1:0] w_vec[P_OCH] [P_ICH];
-    always_comb begin
-        for (int i = 0; i < P_ICH; i++) begin
-            x_vec[P_ICH - 1 - i] = in_buf[i*A_BIT+:A_BIT];
+
+    // 延迟寄存器: 对齐 weight ROM 1拍读取延迟
+    logic [P_ICH*A_BIT-1:0] in_data_d;   // in_data 延迟 1 拍
+    logic [A_BIT-1:0]        x_mac [P_ICH];  // 送入 MAC 的输入（非压缩数组与端口匹配）
+    logic signed [W_BIT-1:0] w_vec [P_OCH][P_ICH];
+    logic                    dat_vld_d;
+    logic                    clr_d;
+    logic                    dat_vld_mac;
+    logic                    clr_mac;
+    logic                    is_fst_fo_d;  // is_fst_fo 延迟 1 拍
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            in_data_d   <= '0;
+            dat_vld_d   <= 1'b0;
+            clr_d       <= 1'b0;
+            is_fst_fo_d <= 1'b1;
+        end else if (pipe_en_out) begin
+            in_data_d   <= in_data;             // 缓存当前输入，与 ROM 对齐
+            dat_vld_d   <= mac_array_data_vld;  // 延迟有效标志
+            clr_d       <= is_fst_kk_fi;        // 延迟清零信号
+            is_fst_fo_d <= is_fst_fo;           // 延迟流向选择
         end
     end
+
+    // in_buf_d: 使用延迟后的 is_fst_fo_d 选择数据源
+    // fo=0: 用 in_data_d (对齐 ROM 1拍延迟)
+    // fo=1: 用 lb_rdata  (干 1拍读取延迟，在 fo=0 过渡的一拍后仍指向正确的 LB 数据)
+    always_comb begin
+        for (int i = 0; i < P_ICH; i++) begin
+            x_mac[i] = is_fst_fo_d
+                       ? in_data_d[i*A_BIT+:A_BIT]
+                       : line_buffer_rdata[i*A_BIT+:A_BIT];
+        end
+    end
+    assign dat_vld_mac = dat_vld_d;
+    assign clr_mac     = clr_d;
 
     always_comb begin
         for (int o = 0; o < P_OCH; o++) begin
@@ -150,16 +180,32 @@ module conv #(
                 .clk    (clk),
                 .rst_n  (rst_n),
                 .en     (pipe_en_out),
-                .dat_vld(mac_array_data_vld),
-                .clr    (is_fst_kk_fi),
-                .x_vec  (x_vec),
+                .dat_vld(dat_vld_mac),
+                .clr    (clr_mac),
+                .x_vec  (x_mac),
                 .w_vec  (w_vec[o]),
                 .acc    (acc[o])
             );
         end
     endgenerate
 
-    assign out_valid = is_lst_kk_fi;
+    // 输出有效延迟 1 拍，与 x_vec_d/weight_data 流水对齐
+    // conv_mac_array 输出 acc 为组合逻辑（含当前拍 partial_sum），无需额外等待
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            out_valid_d <= 1'b0;
+        end else if (pipe_en_out) begin
+            if (out_valid_d && out_ready) begin
+                out_valid_d <= is_lst_kk_fi; // or 0 depending on next state
+            end else begin
+                out_valid_d <= is_lst_kk_fi;
+            end
+        end else if (out_valid_d && out_ready) begin
+            out_valid_d <= 1'b0;
+        end
+    end
+
+    assign out_valid = out_valid_d;
 
     always_comb begin
         for (int o = 0; o < P_OCH; o++) begin

@@ -23,13 +23,11 @@ VCS_FLAGS = -full64 \
             -timescale=1ns/1ps \
             +v2k \
             -debug_access+all \
-            -lca \
-            -kdb \
             +lint=TFIPC-L \
             +warn=noUFTMD \
-            +incdir+$(PROJECT_PATH)/data \
-            -P ${VERDI_HOME}/share/PLI/VCS/LINUX64/novas.tab \
-            ${VERDI_HOME}/share/PLI/VCS/LINUX64/pli.a
+            +incdir+$(PROJECT_ROOT)/data \
+            -novopt \
+            -LDFLAGS "-Wl,--no-as-needed"
 
 # Simulation flags for FSDB dumping
 SIM_FLAGS = +vcs+flush+all \
