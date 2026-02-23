@@ -85,11 +85,14 @@ module conv #(
     assign pipe_en              = pipe_en_in && pipe_en_out;
     // in_ready 仅在 is_fst_fo 时有效：fo=1 时 DUT 从 LB 读取，无需新输入
     assign in_ready             = is_fst_fo && pipe_en_out;
-    assign weight_addr          = (cntr_fo * KK * FOLD_I) + cntr_fi * KK + cntr_kk;
-    assign line_buffer_we       = is_fst_fo && in_valid;
+    assign weight_addr          = (cntr_fo * KK * FOLD_I) + cntr_fi * KK + cntr_kk;    // == LB 读写控制 ==
+    // is_fst_fo 时从输入取数并写入 LB，之后从 LB 读数
+    // 控制写入必须要等流水线有效（pipe_en）而不是仅仅 in_valid，这样下游堵住时不会向相同的地址覆盖写入旧数据
+    assign line_buffer_we       = is_fst_fo && pipe_en;
     assign line_buffer_waddr    = cntr_fi * KK + cntr_kk;
     assign line_buffer_wdata    = in_data;
-    assign line_buffer_re    = !is_fst_fo && pipe_en_out;  // 暂停时不读 LB，防止 rdata 超前
+    // 从 SRAM 读取也应该等下游准备好，避免空转耗电和超前数据
+    assign line_buffer_re       = !is_fst_fo && pipe_en_out;
     assign line_buffer_raddr = cntr_fi * KK + cntr_kk;
 
     always_ff @(posedge clk or negedge rst_n) begin
